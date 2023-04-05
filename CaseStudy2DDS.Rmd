@@ -1,0 +1,87 @@
+---
+title: "Case Study 2 DDS"
+author: "Nicholas Sager"
+date: "2023-04-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Introduction text
+
+For an interactive app to visualize this data, please see: [Shiny App](https://nicksager.shinyapps.io/CaseStudy1/)
+
+## Data Description
+
+A description of the data, where it came from, and what it contains.
+
+### Read the Data
+
+First, we will read in the beers data, and merge the breweries data so that each beer has brewery data associated with it. Then we will view a few row to make sure it looks ok. 
+
+
+## Data Exploration
+
+### NA Values
+
+### Visualizing Variables of interest
+
+Salary and attrition
+- summary statistics
+- relationship to eachother
+
+
+### Salary and Attrition by other metrics (department / job title)
+
+boxplots
+
+### Pairwise scatterplots of key variables
+
+
+## Modelling
+
+### Transformations and further cleaning
+
+### Attrition
+
+sensitivity + specificity (>60 + >60)
+
+#### KNN
+
+#### Naive Bayes
+
+### Salary
+
+RMSE (<$3000)
+
+#### Linear Regression
+Include assumptions
+
+#### Logistic regression?
+Maybe include if there is more time
+
+## Results and Discussion
+
+Top 3 Factors predicting attrition
+
+Other Tests
+
+## Conclusion
+
+Conclusion text
+
+This analysis has answered the initial questions posed by Budweiser's request, and has perhaps raised even more. The author hopes that this analysis will be useful to Budweiser in their future product development. Any questions about this analysis or proposals for additional research can be directed to the author at:
+
+Nicholas Sager: nsager@smu.edu  
+
+## Appendix 
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
+
+
+
