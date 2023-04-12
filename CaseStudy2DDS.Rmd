@@ -6,79 +6,1101 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning=FALSE) # Hide warnings, use for final version.
+knitr::opts_chunk$set(message=FALSE) # Hide messages, use for final version.
+
+# Required Libraries
+library(knitr)
+library(kableExtra)
+library(ggthemes)
+library(multcomp)
+library(caret)
+library(janitor)
+library(doParallel)
+library(e1071)
+library(class)
+library(tidyverse)
 ```
 
 ## Introduction
 
-Introduction text
+DDSAnalytics is an analytics company that specializes in talent management solutions for Fortune 100 companies. Talent management is defined as the iterative process of developing and retaining employees. It may include workforce planning, employee training programs, identifying high-potential employees and reducing/preventing voluntary employee turnover (attrition). To gain a competitive edge over its competition, DDSAnalytics is planning to leverage data science for talent management. The executive leadership has identified predicting employee turnover as its first application of data science for talent management. Before the business green lights the project, they have tasked our data science team to conduct an analysis of existing employee data. 
 
-For an interactive app to visualize this data, please see: [Shiny App](https://nicksager.shinyapps.io/CaseStudy1/)
+Given a dataset, we will do a data analysis to identify factors that lead to attrition.  We will identify the top three factors that contribute to turnover (backed up by evidence provided by analysis). There may or may not be a need to create derived attributes/variables/features. The business is also interested in learning about any job role specific trends that may exist in the data set (e.g., “Data Scientists have the highest job satisfaction”). We will also provide any other interesting trends and observations from our analysis. The analysis will be backed up by robust experimentation and appropriate visualization. Experiments and analysis will be conducted in R. We will also to build a model to predict attrition.  Finally, we will develop an RShiny App to visualize some of the relationships or lack thereof.
+
+For an interactive app to visualize this data, please see: [Shiny App](https://nicksager.shinyapps.io/CaseStudy2/)
+For a video presentation of this analysis, please see: [Video Presentation](https://youtu.be/1Z7Z2Z7Z2Z4)
 
 ## Data Description
 
-A description of the data, where it came from, and what it contains.
+The dataset is a collection of existing employee data provided by DDSAnalytics, which advises primarily Fortune 100 companies. It contains 870 records of 31 variables for each employee. Variables measured include, but are not limited to, job title and department, salary information, satisfaction with various aspects, and whether or not the employee left. We additionally have testing datasets which have Attrition or Salary information withheld which will be used to evaluate the models.
 
-### Read the Data
+```{r include=FALSE}
+#Read the Data and look at the first few rows
+df = read_csv("CaseStudy2-data.csv")
 
-First, we will read in the beers data, and merge the breweries data so that each beer has brewery data associated with it. Then we will view a few row to make sure it looks ok. 
-
+head(df)
+str(df)
+```
 
 ## Data Exploration
 
 ### NA Values
 
+The first thing we will look for in the data is whether there are any NA values, and if so, where they are. If present, NAs will have to be handled in some way before we can proceed with our analysis.
+
+```{r}
+# Summarise na's by column
+df %>%
+    summarize_all(~ sum(is.na(.))) %>%
+    filter(.[1] > 0)
+```
+Number of distinct values per column:
+```{r}
+# Summarise dinstinct values by column
+df %>%
+    summarize_all(~ n_distinct(.)) %>%
+    data.frame()
+```
+
+There are no NA values in the data set. There are, however, three columns with only one unique value: Over18, StandardHours, and EmployeeCount. We will remove these columns from the data set so that they do not interfere with our analysis.
+
+```{r}
+# Remove columns with only one unique value
+df <- df %>%
+    select(-c(Over18, StandardHours, EmployeeCount))
+```
+
 ### Visualizing Variables of interest
 
-Salary and attrition
-- summary statistics
-- relationship to eachother
+The two variables we are most concerned about are Salary (MonthlyIncome) and Attrition. We will start by visualizing these variables.
+
+```{r}
+# Salary Exploration
+df %>%
+    ggplot(aes(x = MonthlyIncome)) +
+    geom_histogram(bins = 20, fill = "lightblue", color = "black") +
+    theme_minimal() +
+    labs(
+        title = "Salary Distribution",
+        x = "Salary",
+        y = "Count"
+    )
+
+df %>%
+    ggplot(aes(x = MonthlyIncome)) +
+    geom_boxplot(fill = "lightblue") +
+    theme_minimal() +
+    labs(
+        title = "Salary Distribution",
+        x = "Salary",
+        y = "Count"
+    )
+
+summary(df$MonthlyIncome)
+```
+
+There is some evidence of right skew in the salary data. The median monthly salary is $4946 and the mean is $6390, which supports the right skew. We will most likely use a log transformation for our analysis of salary.
+
+Next we will explore the overall attrition rate in the data set:
+
+```{r}
+# Attrition Exploration
+df %>%
+    ggplot(aes(x = Attrition)) +
+    geom_bar(fill = "lightblue") +
+    theme_minimal() +
+    labs(
+        title = "Attrition Distribution",
+        x = "Attrition",
+        y = "Count"
+    )
+
+summary(as.factor(df$Attrition))
+```
+
+We can see that the dataset is quite unbalanced in regards to attrition. There are 730 employees who have not left the company, and only 140 who have left (19%). This will be important to keep in mind when we are building our models and may necessitate the use of resampling techniques.
+
+Let's visualize whether salary and attrition are related to each other:
+
+```{r}
+# Salary vs Attrition
+df %>%
+    ggplot(aes(x = Attrition, y = MonthlyIncome)) +
+    geom_boxplot(fill = "lightblue") +
+    theme_minimal() +
+    labs(
+        title = "Salary Distribution by Attrition",
+        x = "Attrition",
+        y = "Salary"
+    )
+
+# Test whether salary is different between groups
+t.test(
+    df %>%
+        filter(Attrition == "Yes") %>%
+        pull(MonthlyIncome),
+    df %>%
+        filter(Attrition == "No") %>%
+        pull(MonthlyIncome)
+)
+```
+
+It appears that lower salaries are associated with attrition. We will explore this relationship further in our analysis, but salary will likely be an important factor in our model. The mean salaries of those who left the company are significantly lower than those who stayed (p < 0.001 for a Welch's two sample t-test). We can be 95% confident that the mean monthly salary is between $1220 and $2650 lower for those who left. Our best estimate is $1937 lower. 
+
+### Salary and Attrition by other Metrics
+First we will look at salary by department:
+
+```{r}
+# Salary by Department boxplots
+df %>%
+    ggplot(aes(x = Department, y = MonthlyIncome, fill = Department)) +
+    geom_boxplot(show.legend = FALSE) +
+    theme_minimal() +
+    labs(
+        title = "Salary Distribution by Department",
+        x = "Department",
+        y = "Salary"
+    )
 
 
-### Salary and Attrition by other metrics (department / job title)
+df %>%
+    group_by(Department) %>%
+    summarize(
+        mean_salary = mean(MonthlyIncome),
+        median_salary = median(MonthlyIncome),
+        sd_salary = sd(MonthlyIncome)
+    ) %>%
+    arrange(desc(median_salary)) %>%
+    kable() %>%
+    kable_styling()
 
-boxplots
+# Test whether mean salaries are different using a multiple comparison test
+model <- aov(MonthlyIncome ~ Department, data = df)
+summary(model)
+TukeyHSD(model)
+
+# Test whether median salaries are different using a multiple comparison test
+kruskal.test(
+    MonthlyIncome ~ Department,
+    data = df
+)
+```
+Sales vs. Research & Development:
+```{r}
+# How to do multiple comparisons of the median??
+# wilcoxon rank sum test
+wilcox.test(MonthlyIncome ~ Department,
+    data = df[(df$Department == "Sales" | df$Department == "Research & Development"), ],
+    paired = FALSE, alternative = "two.sided"
+)
+```
+Sales vs. Human Resources:
+```{r}
+wilcox.test(MonthlyIncome ~ Department,
+    data = df[(df$Department == "Sales" | df$Department == "Human Resources"), ],
+    paired = FALSE, alternative = "two.sided"
+)
+```
+Human Resources vs. Research & Development:
+```{r}
+wilcox.test(MonthlyIncome ~ Department,
+    data = df[(df$Department == "Human Resources" | df$Department == "Research & Development"), ],
+    paired = FALSE, alternative = "two.sided"
+)
+```
+
+The departments have similar mean salaries, but the median salaries vary greatly. The highest median salary is in the Sales department and the lowest is in Human Resources. We will keep this in mind when exploring attrition. Additionally, the right skew is present across all of the departments but is extremely pronounced in the Human Resources department. 
+
+Looking at the Human Resources department, there are only two roles. Managers who are paid among the highest salaries and "Human Resources" who are paid among the lowest. This may be worth investigating further if time and resources permit, but the skew is most likely related to the lack of a mid-level role in the Human Resources department.
+
+The mean salaries are not significantly different between the departments (p = 0.16 from an ANOVA), but the median salaries are (p < 0.001 from a Kruskal-Wallis test). The median salaries are significantly different between the Sales and Human Resources departments (p = 0.006 from a Wilcoxon rank sum test), and between the Sales and Research & Development departments (p < 0.001 from a Wilcoxon rank sum test). The median salaries are not significantly different between the Human Resources and Research & Development departments (p = 0.25 from a Wilcoxon rank sum test).
+
+Next, let's look at salary by Job Role:
+
+```{r}
+# Salary by JobRole boxplots
+df %>%
+    ggplot(aes(x = reorder(JobRole, MonthlyIncome), y = MonthlyIncome, fill = Department)) +
+    geom_boxplot() +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+        title = "Salary Distribution by Job Role",
+        x = "Job Role",
+        y = "Salary"
+    )
+
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        mean_salary = mean(MonthlyIncome),
+        median_salary = median(MonthlyIncome),
+        sd_salary = sd(MonthlyIncome)
+    ) %>%
+    arrange(desc(median_salary)) %>%
+    kable() %>%
+    kable_styling()
+
+
+```
+There are three distinct tiers here. Managers and Research directors make the most, followed by Healthcare Representatives, Manufacturing Directors, and Sales Executives. The remaining roles fill a lower tier of salaries.
+
+Next we will repeat the same analysis for attrition. First, by department:
+
+```{r}
+# Attrition by Department plot
+df %>%
+    group_by(Department) %>%
+    ggplot(aes(x = (Department), fill = Attrition)) +
+    geom_bar() +
+    theme_minimal() +
+    labs(
+        title = "Attrition by Department",
+        x = "Department",
+        y = "Count"
+    )
+
+df %>%
+    group_by(Department) %>%
+    summarize(
+        attrition_rate = mean(Attrition == "Yes"),
+        sd_attrition = sd(Attrition == "Yes")
+    ) %>%
+    arrange(desc(attrition_rate)) %>%
+        kable() %>%
+        kable_styling()
+    
+# Test whether attrition rates are different using a multiple comparison test
+model <- aov(Attrition == "Yes" ~ Department, data = df)
+summary(model)
+TukeyHSD(model)
+```
+Sales has the highest attrition while Research & Development has the lowest. The difference in attrition rate between the Sales and R & D departments is significant (p < 0.01 from a Tukey HSD test).
+
+Here is the Attrition by JobRole:
+
+```{r}
+# Attrition by JobRole scatterplot
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        attrition_rate = mean(Attrition == "Yes"),
+        sd_attrition = sd(Attrition == "Yes")
+    ) %>%
+    ggplot(aes(x = reorder(JobRole, attrition_rate), y = attrition_rate, color = JobRole)) +
+        geom_point(size = 3, show.legend = FALSE) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        labs(
+            title = "Attrition by Job Role",
+            x = "Job Role",
+            y = "Count"
+        )
+
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        attrition_rate = mean(Attrition == "Yes"),
+        sd_attrition = sd(Attrition == "Yes")
+    ) %>%
+    arrange(desc(attrition_rate)) %>%
+    kable() %>%
+    kable_styling()
+```
+The attrition rate is highest for Sales Representatives by more than double the next highest. This is an interesting finding and will be explored further in our analysis. Also noteworthy is that the hightest paying tier of roles has the lowest attrition rates.
+
+Next we will explore several relationships that may be of interest in understanding attrition. First, we will look at the relationship between median salary and attrition of a role.
+
+```{r}
+# Attrition Rate by Median Salary grouped by JobRole
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        median_salary = median(MonthlyIncome),
+        attrition_rate = mean(Attrition == "Yes")
+    ) %>%
+    ggplot(aes(x = (median_salary), y = (attrition_rate), color = JobRole)) +
+    geom_point(size = 3) +
+    theme_minimal() +
+    labs(
+        title = "Attrition Rate by Median Salary",
+        x = "Median Salary",
+        y = "Attrition Rate"
+    )
+```
+
+There appears to be a negative relationship between Attrition rate and Median Salary. Sales Representatives appear to be an exception to this trend and probably have other factors that are driving their high attrition rate. Similarly, Manufacturing directors have a much lower attrition than their salary may suggest. 
+
+For good measure, we will count the number of each role in the dataset in order to check whether small sample sizes may be skewing our results.
+```{r}
+# Count of each JobRole
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        count = n()
+    ) %>%
+    arrange(desc(count)) %>%
+    kable() %>%
+    kable_styling()
+```
+The sample sizes are large enough that we can assume the Central Limit Theorem and be confident that the results are not due to small sample sizes alone. As one would expect, there are less of the highest tier of jobs.
+
+Next, we will investigate the relationship between the mean Job Satisfaction and Attrition rate by role.
+
+```{r}
+# Attrition Rate by Mean Job Satisfaction grouped by JobRole
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        mean_satisfaction = mean(JobSatisfaction),
+        attrition_rate = mean(Attrition == "Yes")
+    ) %>%
+    ggplot(aes(x = (mean_satisfaction), y = (attrition_rate), color = JobRole)) +
+        geom_point(size = 3) +
+        theme_minimal() +
+        labs(
+            title = "Attrition Rate by Mean Job Satisfaction",
+            x = "Mean Job Satisfaction",
+            y = "Attrition Rate"
+        )
+    
+df %>%
+    group_by(JobRole) %>%
+    summarize(
+        mean_satisfaction = mean(JobSatisfaction),
+        attrition_rate = mean(Attrition == "Yes")
+    ) %>%
+    kable() %>%
+        kable_styling()
+    
+
+```
+There aren't any clear trends here. Sales Representatives apparently aren't leaving because of job dissatisfaction because they are average in this regard. It should be noted that the range of values for job satisfaction is relatively narrow, so it may not be relevant in aggregate. However, it would be interesting to compare job satisfaction of those who left to those who stayed.
+
+```{r}
+# Job Satisfaction by Attrition
+df %>%
+    group_by(Attrition) %>%
+    ggplot(aes(x = Attrition, y = JobSatisfaction)) +
+    geom_boxplot(fill = "lightblue") +
+    theme_minimal() +
+    labs(
+        title = "Job Satisfaction by Attrition",
+        x = "Attrition",
+        y = "Job Satisfaction"
+    )
+
+df %>%
+    group_by(Attrition) %>%
+    summarize(
+        mean_satisfaction = mean(JobSatisfaction),
+        median_satisfaction = median(JobSatisfaction),
+        sd_satisfaction = sd(JobSatisfaction)
+    ) %>%
+    kable() %>%
+        kable_styling()
+    
+# Test whether the mean job satisfaction is statistically different between those who left and those who stayed
+t.test(
+    df %>%
+        filter(Attrition == "Yes") %>%
+        pull(JobSatisfaction),
+    df %>%
+        filter(Attrition == "No") %>%
+        pull(JobSatisfaction)
+)
+```
+The mean difference in Job Satisfaction appears small between those who left and those who did not, but further investigation reveals that the difference is strongly statistically significant (p = 0.0015 from a Welch's 2 sample t-test). A visual inspection of the box plot shows evidence of a left skew in job satisfaction for those who left. For these reasons we expect Job Satisfaction to be a strong predictor of attrition.
+
+Next we will look at attrition rate and job satisfaction based on travel:
+
+```{r}
+df %>%
+    group_by(BusinessTravel) %>%
+    summarize(
+        mean_satisfaction = mean(JobSatisfaction),
+        attrition_rate = mean(Attrition == "Yes")
+    ) %>%
+    arrange(desc(attrition_rate)) %>%
+    ggplot(aes(x = reorder(BusinessTravel, attrition_rate), y = (attrition_rate), color = BusinessTravel)) +
+        geom_point(size = 3) +
+        theme_minimal() +
+        labs(
+            title = "Attrition Rate by Travel Frequency",
+            x = "",
+            y = "Attrition Rate"
+        )
+
+df %>%
+    group_by(BusinessTravel) %>%
+    summarize(
+        mean_satisfaction = mean(JobSatisfaction),
+        attrition_rate = mean(Attrition == "Yes")
+    ) %>%
+    arrange(desc(attrition_rate)) %>% 
+    kable() %>%
+    kable_styling()
+
+# Test whether the attrition rate is statistically different between the three travel categories
+chisq.test(table(df$Attrition, df$BusinessTravel))
+```
+Here we can see that the attrition rate has a significant association with travel frequency (p = 0.0499 from Pearson's Chi-squared test). Based on this result, we expect travel frequency to be a strong predictor of attrition.
+
+Another factor that could be important in predicting attrition is the performance rating. We do not have data on whether the cases of attrition were voluntary, involuntary, or mutual. One could hypothesize that lower-performing employees are more likely to leave.
+
+```{r}
+# Boxplots of Performance Rating by Attrition
+df %>%
+    group_by(Attrition) %>%
+    ggplot(aes(x = Attrition, y = PerformanceRating)) +
+    geom_boxplot(fill = "lightblue") +
+    theme_minimal() +
+    labs(
+        title = "Performance Rating by Attrition",
+        x = "Attrition",
+        y = "Performance Rating"
+    )
+
+# Summary statistics of Performance Rating by Attrition
+df %>%
+    group_by(Attrition) %>%
+    summarize(
+        mean_rating = mean(PerformanceRating),
+        median_rating = median(PerformanceRating),
+        sd_rating = sd(PerformanceRating)
+    ) %>%
+    kable() %>%
+        kable_styling()
+    
+# Test whether the mean performance rating is statistically different between those who left and those who stayed
+t.test(
+    df %>%
+        filter(Attrition == "Yes") %>%
+        pull(PerformanceRating),
+    df %>%
+        filter(Attrition == "No") %>%
+        pull(PerformanceRating)
+)
+```
+This is evidently not the case. The performance rating of those who left are nearly identical to those who stayed (p = 0.661 from a two sample t-test). Thus, performance rating is not expected to be a strong predictor of attrition.
 
 ### Pairwise scatterplots of key variables
 
+At this point, we will look at pairwise scatterplots between key variables to check for any relationships of multicollinearity that we may have missed. We will also look at the correlation matrix to check for any relationships between variables.
+```{r}
+# Pairwise scatterplots of key variables using ggally
+library(GGally)
+ggpairs(df %>%
+    dplyr::select(
+        Age,
+        DistanceFromHome,
+        JobSatisfaction,
+        MonthlyIncome,
+        NumCompaniesWorked,
+        TotalWorkingYears,
+        YearsAtCompany,
+        YearsSinceLastPromotion,
+        YearsWithCurrManager
+    ))
+
+# Correlation matrix heatmap plot with
+library(corrplot)
+corrplot(cor(df %>%
+                dplyr::select(
+                    Age,
+                    DistanceFromHome,
+                    JobSatisfaction,
+                    MonthlyIncome,
+                    NumCompaniesWorked,
+                    TotalWorkingYears,
+                    YearsAtCompany,
+                    YearsSinceLastPromotion,
+                    YearsWithCurrManager
+                )),
+            method = "color",
+            type = "upper",
+            order = "hclust",
+            tl.col = "black",
+            tl.srt = 45)
+
+df %>%
+    dplyr::select(
+        Age,
+        DistanceFromHome,
+        JobSatisfaction,
+        MonthlyIncome,
+        NumCompaniesWorked,
+        TotalWorkingYears,
+        YearsAtCompany,
+        YearsSinceLastPromotion,
+        YearsWithCurrManager
+    ) %>%
+    cor() %>%
+        round(2) %>%
+        kable(col.names = c("Age", "Distance From Home", "Job Satisfaction",
+            "Income", "Companies Worked", "Total Working Years", "Years At Company",
+            "Years Since Promotion", "Years With Manager")) %>%
+        column_spec(1:9, width = "fit") %>% 
+        kable_styling(full_width = FALSE)
+```
+
+From the pairwise scatterplots and correlation matrix, we can see some variables that are highly correlated with each other. For example, there appear to be relationships between TotalWorkingYears, YearsAtCompany, and YearsWithCurrManager. We will consider removing YearsAtCompany and YearsWithCurrManager from the model to avoid multicollinearity. Monthly Income appears somewhat correlated with YearsAtCompany and Age, which does make sense and will likely be useful in modelling salary.
 
 ## Modelling
 
+The next analysis will be to model the attrition rate and build a classifier to predict the attrition of future employees. We expect this will be useful for DDSAnalytics and their clients, not only for it's predictive power, but also for the insights it can provide into the factors that contribute to attrition. We will also model salary, as this is a key factor in employee retention and one of the questions of interest in this analysis.
+
 ### Transformations and further cleaning
+
+Before we begin modelling, we will need to transform some of the variables to fit for the analysis. Based on the earlier visualization of salary data, we will consider all salaries on the log scale in order to correct for the skew and to meet the assumptions inherent in the models. Next, we will transform the categorical variables into dummy variables. At this time, we are leaving the remaining variables in the models despite some multicollinearity, as they may contain useful information despite some redundancy.
+
+```{r}
+dfCopy <- df
+
+# Transform salary to log scale
+df <- dfCopy %>%
+    mutate(
+        logMonthlyIncome = log(MonthlyIncome)
+    ) %>%
+    select(-MonthlyIncome)
+
+# Transform categorical variables to dummy variables using dummyVars
+dummy_model <- dummyVars(Attrition ~ ., data = df)
+df_dummy <- as.data.frame(predict(dummy_model, newdata = df))
+df_dummy$Attrition <- df$Attrition
+# df_dummy <- clean_names(df_dummy) # Might be needed to linear regression, uncomment if so
+```
 
 ### Attrition
 
-sensitivity + specificity (>60 + >60)
+The first aspect of that data we will model is attrition. The plan is to use both a KNN and Naive Bayes classifier to predict attrition. We will use sensitivity and specificity to evaluate the performance of the models and Confusion Matrices to evaluate the results. Our benchmark goal for a useful model is a sensitivity and specificity of at least 60% each.
 
 #### KNN
 
+K-Nearest Neighbors is a non-parametric method used for classification and regression. In this case, we will use it for classification. The algorithm works by assigning a new observation to the class that is most common among its k nearest neighbors. The value of k is a hyperparameter that can be tuned to improve the model. We will use 5-fold cross-validation to tune the model and evaluate the performance of the model. We will also use the caret package to train the model.
+
+Because the dataset is unbalanced in favor of employees who stayed, we will use minority oversampling to balance the dataset. This will help prevent bias in the model in favor of classifying employees as staying, but we will also lose some information by doing this because oversampling effectively duplicates some of the data.
+
+```{r}
+# Train a KNN model using caret
+
+# Define trainControl for 5-fold cross-validation with minority oversampling
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 5,
+    classProbs = TRUE,
+    savePredictions = TRUE,
+    sampling = "up",
+    summaryFunction = twoClassSummary
+)
+
+# Define tuning grid for k
+tuningGrid <- expand.grid(
+    k = seq(5, 49, by = 2)
+)
+
+# Check if the model object exists, train if it doesn't
+if (file.exists("Models/knn.rds")) {
+  # Load the model object from disk
+  knn_model <- readRDS("Models/knn.rds")
+} else {
+  # Perform stepwise selection
+
+  # Set up a parallel backend with the number of cores you want to use
+  cores <- 8 # Change this to the number of cores you want to use
+  cl <- makePSOCKcluster(cores)
+  registerDoParallel(cl)
+
+    # Train the model
+    set.seed(137)
+    knn_model <- train(Attrition ~ .,
+        data = df_dummy,
+        method = "knn",
+        trControl = ctrl,
+        tuneGrid = tuningGrid,
+        preProcess = c("center", "scale", "nzv"),
+        metric = "ROC",
+        tuneLength = 10,
+        na.action = na.omit
+    )
+  
+  # Stop the parallel backend
+  stopCluster(cl)
+  
+  # Save the model object to disk
+  saveRDS(knn_model, "Models/knn.rds")
+}
+
+# Check the best overall results
+knn_model$results %>%
+    mutate(metric = Sens + Spec) %>%
+    arrange(desc(metric)) %>%
+    head(10)
+
+# Evaluate the model using confusion matrix
+predictions <- predict(knn_model, newdata = df_dummy)
+confusion_matrix <- confusionMatrix(predictions, as.factor(df_dummy$Attrition))
+confusion_matrix
+
+# Visualize how the results are classified
+knn_model$pred %>%
+    filter(k == knn_model$bestTune$k) %>%
+    select(Yes, obs) %>%
+    ggplot(aes(x = Yes, fill = obs)) +
+    geom_histogram(bins = 20) +
+    labs(x = "Probability", y = "Count", title = "Distribution of predicted probabilities")
+
+# Plot ROC curve
+selectedIndices <- knn_model$pred$k == knn_model$bestTune$k
+library(plotROC)
+g <- ggplot(knn_model$pred[selectedIndices, ], aes(m = Yes, d = factor(obs, levels = c("Yes", "No")))) +
+    geom_roc(n.cuts = 0) +
+    coord_equal() +
+    style_roc()
+g <- g + annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", round((calc_auc(g))$AUC, 4)))
+g
+```
+
+The KNN model performs fairly well. It's Sensitivity and Specificity are both 0.75 against the whole training set, with a ROC AUC of 0.75 as well. These meet the goals of the project, but the negative predictive value (in this case, Attrition = Yes) is still quite low at 0.37. Oversampling the minority class is crucial for the KNN. Without balancing the classes, accuracy approaches 0.99, but the specificity is only 0.07. In short, the KNN is useful, but we expect the Naive Bayes model to be an improvement given it's probabilistic nature.
+
+
 #### Naive Bayes
+
+A Naive Bayes model is a probabilistic model that is commonly used for classification tasks. It's based on Bayes' theorem, which states that the probability of a hypothesis (in this case, a classification) given some evidence (in this case, the features or variables) is proportional to the probability of the evidence given the hypothesis, multiplied by the prior probability of the hypothesis. Theorem: $$ P(A|B) = (P(B|A)P(A))/P(B) $$ The Naive Bayes model makes the assumption that the features are independent of each other, which is why it's called "Naive". This assumption is often violated in real-world data, but it's a useful model for classification tasks.
+
+Because Naive Bayes is a probabilistic model, the unbalanced nature of the Attrition data should be less of an issue. Like the KNN, we wil train the model using 5-fold repeated cross-validation using the caret package. We will also use the hyperparameters Laplace smoothing, bandwidth, and kernel to tune the model.
+
+```{r}
+# Train a Naive Bayes model using caret
+
+# Define trainControl for 5-fold cross-validation with minority oversampling
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 5,
+    classProbs = TRUE,
+    savePredictions = TRUE,
+    sampling = "up",
+    summaryFunction = twoClassSummary
+)
+
+# Define tuning grid for NB
+tuningGrid <-   expand.grid(usekernel = c(TRUE, FALSE),
+                         laplace = seq(0,1, by = 0.2), 
+                         adjust = seq(0.5, 1.9, by = 0.2))
+
+# Check if the model object exists, train if it doesn't
+if (file.exists("Models/nb.rds")) {
+  # Load the model object from disk
+  nb_model <- readRDS("Models/nb.rds")
+} else {
+  # Perform stepwise selection
+
+  # Set up a parallel backend with the number of cores you want to use
+  cores <- 8 # Change this to the number of cores you want to use
+  cl <- makePSOCKcluster(cores)
+  registerDoParallel(cl)
+
+  # Train the model
+    set.seed(137)
+    nb_model <- train(Attrition ~ .,
+        data = df_dummy,
+        method = "naive_bayes",
+        trControl = ctrl,
+        tuneGrid = tuningGrid,
+        preProcess = c("center", "scale", "nzv"),
+        metric = "ROC",
+        na.action = na.omit
+    )
+  
+  # Stop the parallel backend
+  stopCluster(cl)
+  
+  # Save the model object to disk
+  saveRDS(nb_model, "Models/nb.rds")
+}
+
+summary(nb_model)
+plot(nb_model)
+
+# Check the best overall results
+nb_model$results %>%
+    mutate(metric = Sens + Spec) %>%
+    arrange(desc(metric)) %>%
+    head(10)
+
+# Evaluate the model using confusion matrix
+predictions <- predict(nb_model, newdata = df_dummy)
+confusion_matrix <- confusionMatrix(predictions, as.factor(df_dummy$Attrition))
+confusion_matrix
+
+# Visualize how the results are classified
+# as.data.frame(predictions) %>% 
+#     ggplot(aes(x = predictions, fill = df_dummy$Attrition)) +
+#     geom_histogram(bins = 20) +
+#     labs(x = "Probability", y = "Count", title = "Distribution of predicted probabilities")
+
+# Load necessary packages
+library(ggplot2)
+library(pROC)
+
+# define object to plot and calculate AUC
+evalResult.nb <- predict(nb_model, df_dummy, type = "prob")
+rocobj <- roc(df_dummy$Attrition, evalResult.nb[, 2])
+auc <- round(auc(df_dummy$Attrition, evalResult.nb[, 2]),4)
+
+#create ROC plot with minimal theme
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+  ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')')) +
+  theme_minimal()
+```
+
+As expected, the Naive Bayes model appears to be an improvement on the KNN model. Compared against the entire training set, the Sensitivity is 0.76 and the Specificity is 0.80 with a ROC AUC of 0.86. The negative predicted value is likewise improved, but still fairly low at 0.39. The model has a Kappa score of 0.395 vs 0.35 for the KNN. Like the KNN, oversampling the minority class is crucial due to the unbalanced nature of the dataset.
+
+The author posits that there may be a reason that these models struggle with predicting Attrition. It may be that there is an upper limit on the accuracy with which Attrition can be predicted given the data we have. The decision to leave (or ask a subordinate to leave) is a complex decision that is influenced by many factors. Perhaps the data we have has some associations with Attrition, but fails to capture the internal factors which influence this decision.
+
+Next we will find the variable importance from the Naive Bayes model.
+    
+```{r}
+# Install and load the FSelectorRcpp package
+# install.packages("FSelectorRcpp")
+library(FSelectorRcpp)
+
+# Prepare your dataset by separating the features and the target variable
+names <- names(df_dummy)[-which(names(df_dummy) == "Attrition")]
+X <- df_dummy[, names]
+y <- df_dummy$Attrition
+
+# Calculate information gain
+info_gain <- information_gain(X, y)
+
+# Convert the result to a data frame and sort
+info_gain_df <- as.data.frame(info_gain) %>%
+  rownames_to_column("variable") %>%
+  arrange(desc(importance))
+
+# Filter by desired threshold
+info_gain_filtered <- info_gain_df %>%
+    filter(importance > 0.01)
+
+# Plot the results
+ggplot(info_gain_filtered, aes(x = reorder(attributes, importance), y = importance)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    labs(x = "Variable", y = "Information Gain", title = "Variable Importance") +
+    theme_minimal()
+```
+
+The most important factors predicting attrition include: Part Time Status, StockOptionLevel, Years at company, Job level, and Monthly Income. All of these make sense intuitively. Part time employees probably are more likely to leave, as are employees with low levels of stock options, low job levels, and low monthly income. This is consistent with the results of our data exploration, which show that a lower attrition is associated with more senior jobs, and higher incomes.
+
+#### Logistic regression
+
+Internal factors aside, we are curious whether another model might be able to improve on the predictive power of the KNN and Naive Bayes model. To test this, we will fit a Boosted Logistic Regression model on the training data and compare its performance. Logistic Regression is outside the scope of this document, but the author notes that it involves making a tradeoff on the interpretability of the model. 
+
+```{r}
+# Train a Logistic Regression model using caret
+
+# Define trainControl for 5-fold cross-validation with minority oversampling
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 5,
+    classProbs = TRUE,
+    savePredictions = TRUE,
+    sampling = "up",
+    summaryFunction = twoClassSummary
+)
+
+# Check if the model object exists, train if it doesn't
+if (file.exists("Models/lr.rds")) {
+  # Load the model object from disk
+  lr_model <- readRDS("Models/lr.rds")
+} else {
+  # Perform stepwise selection
+
+  # Set up a parallel backend with the number of cores you want to use
+  cores <- 8 # Change this to the number of cores you want to use
+  cl <- makePSOCKcluster(cores)
+  registerDoParallel(cl)
+
+  # Train the model
+    set.seed(137)
+    lr_model <- train(Attrition ~ .,
+        data = df_dummy,
+        method = "LogitBoost",
+        trControl = ctrl,
+        # tuneGrid = tuningGrid,
+        preProcess = c("center", "scale", "nzv"),
+        metric = "ROC",
+        na.action = na.omit
+    )
+  
+  # Stop the parallel backend
+  stopCluster(cl)
+  
+  # Save the model object to disk
+  saveRDS(lr_model, "Models/lr.rds")
+}
+
+summary(lr_model)
+plot(lr_model)
+
+# Check the best overall results
+lr_model$results %>%
+    mutate(metric = Sens + Spec) %>%
+    arrange(desc(metric)) %>%
+    head(10)
+
+# Evaluate the model using confusion matrix
+predictions <- predict(lr_model, newdata = df_dummy)
+confusion_matrix <- confusionMatrix(predictions, as.factor(df_dummy$Attrition))
+confusion_matrix
+
+# Visualize how the results are classified
+# as.data.frame(predictions) %>% 
+#     ggplot(aes(x = predictions, fill = df_dummy$Attrition)) +
+#     geom_histogram(bins = 20) +
+#     labs(x = "Probability", y = "Count", title = "Distribution of predicted probabilities")
+
+# Load necessary packages
+library(ggplot2)
+library(pROC)
+
+# define object to plot and calculate AUC
+evalResult.rf <- predict(lr_model, df_dummy, type = "prob")
+rocobj <- roc(df_dummy$Attrition, evalResult.rf[, 2])
+auc <- round(auc(df_dummy$Attrition, evalResult.rf[, 2]),4)
+
+#create ROC plot with minimal theme
+ggroc(rocobj, colour = 'steelblue', size = 2) +
+  ggtitle(paste0('ROC Curve ', '(AUC = ', auc, ')')) +
+  theme_minimal()
+```
+
+The Logistic Regression model appears initially to be an improvement on both previous models. Its ROC AUC is 0.89 with Sensitivity 0.76 and Specificity 0.89. The negative predictive value is up to 0.42 and the Kappa score is 0.45. This model will not be used for the submission because it falls outside of the rules.
+
+### Comparing models
+
+Next, we will compare the two models based on their ROC statistic (Area under the ROC curve). The ROC curve is a plot of the true positive rate (Sensitivity) against the false positive rate (1 - Specificity). The area under the ROC curve is a measure of the model's ability to distinguish between the two classes. The closer the area under the curve is to 1, the better the model is at distinguishing between the two classes.
+
+```{r}
+resamps <- resamples(list(
+    KNN = knn_model,
+    NB = nb_model,
+    LR = lr_model
+))
+resamps
+summary(resamps)
+
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+bwplot(resamps, layout = c(3, 1))
+
+trellis.par.set(caretTheme())
+dotplot(resamps, metric = "ROC")
+
+difValues <- diff(resamps)
+difValues
+summary(difValues)
+
+trellis.par.set(theme1)
+bwplot(difValues, layout = c(3, 1))
+
+trellis.par.set(caretTheme())
+dotplot(difValues)
+```
+
+From the comparison, we can see that the Naive Bayes model outperforms the KNN on all three metrics. We are primarily concerned with the ROC statistic, which is a good proxy for the Sensitivity plus Specificity standard specified by the project. The Naive Bayes model has a ROC of 0.86, which is a significant improvement over the KNN model's ROC of 0.76. This difference is statistically significant (p-value < 0.001), as is the difference in Specificity (p-value < 0.01). For these reasons, we will use the Naive Bayes model to make Attrition predictions on the test data.
+
+The performance between the Naive Bayes and Logistic Regression is more Nuanced. The Logistic Regression had high ROC and summary statistics across the whole dataset, but the Naive Bayes outperforms it on average across the cross-validation resamples. In fact, the Naive Bayes model has significantly better ROC (p < 0.01).
+
+
+Next, we will write the predictions using the Naive Bayes model on the test data to a csv file for submission to DDSAnalytics.
+
+```{r}
+# Make predictions on the test data using the classification model
+test <- read_csv("Test/CaseStudy2CompSet No Attrition.csv")
+testCopy <- test
+
+# Transform salary to log scale
+test <- testCopy %>%
+    mutate(
+        logMonthlyIncome = log(MonthlyIncome)
+    ) %>%
+    select(-MonthlyIncome)
+
+# Remove columns with only one unique value
+test = test %>%
+    select(-c(Over18, StandardHours, EmployeeCount))
+
+# Transform categorical variables to dummy variables using dummyVars
+dummy_model <- dummyVars(~ ., data = test)
+test_dummy <- as.data.frame(predict(dummy_model, newdata = test))
+# test_dummy <- clean_names(test_dummy) # Might be needed to linear regression, uncomment if so
+
+# Make predictions on the test data using the knn model
+predictions <- predict(nb_model, newdata = test_dummy)
+predictions <- as.data.frame(predictions) %>%
+    cbind(ID = test$ID) %>%
+    mutate(Attrition = predictions) %>% 
+    select(ID, Attrition)
+
+# Write predictions to csv file
+write_csv(predictions, "Predictions/Case2PredictionsSager Attrition.csv")
+```
 
 ### Salary
 
-RMSE (<$3000)
+The second aspect of that data we will model is Salary in the form of Monthly Income. We will use a Linear Regression to predict salary from the training data. For this model, we will use the Root Mean Squared Error (RMSE) to evaluate our models. Our benchmark goal for a useful model is a RMSE of less than $3000, but we expect to be able to do much better than that.
 
 #### Linear Regression
-Include assumptions
 
-#### Logistic regression?
-Maybe include if there is more time
+We will need to transform the data slightly differently to model salary. The Monthly Income column will be transformed to the log scale, and Attrition will be left in the dataset and transformed to a dummy variable. 
+    
+```{r}
+# Transform salary to log scale
+df <- dfCopy %>%
+    mutate(
+        logMonthlyIncome = log(MonthlyIncome)
+    ) %>%
+    select(-MonthlyIncome, -EmployeeNumber)
+
+# Transform categorical variables to dummy variables using dummyVars
+dummy_model <- dummyVars(logMonthlyIncome ~ ., data = df)
+df_dummy <- as.data.frame(predict(dummy_model, newdata = df))
+df_dummy$logMonthlyIncome <- df$logMonthlyIncome
+df_dummy <- clean_names(df_dummy) # Might be needed to linear regression, uncomment if so
+```
+
+Next, we will train the linear model with stepwise feature selection.
+
+```{r}
+# Stepwise Selection
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 5,
+    # classProbs = TRUE,
+    savePredictions = TRUE
+    # sampling = "up",
+    # summaryFunction = twoClassSummary
+)
+
+# Check if the model object exists, train if it doesn't
+if (file.exists("Models/lm.rds")) {
+  # Load the model object from disk
+  lm_fit <- readRDS("Models/lm.rds")
+} else {
+  # Perform stepwise selection
+
+  # Set up a parallel backend with the number of cores you want to use
+  cores <- 8 # Change this to the number of cores you want to use
+  cl <- makePSOCKcluster(cores)
+  registerDoParallel(cl)
+
+  set.seed(137)
+  lm_fit <- train(log_monthly_income ~ .,
+    data = df_dummy,
+    trControl = ctrl,
+    method = "glmStepAIC",
+    direction = "both",
+    preProcess = c("center", "scale", "nzv", "BoxCox")
+  )
+  
+  # Stop the parallel backend
+  stopCluster(cl)
+  
+  # Save the model object to disk
+  saveRDS(lm_fit, "Models/lm.rds")
+}
+
+summary(lm_fit)
+defaultSummary(data.frame(pred = predict(lm_fit, df_dummy), obs = df_dummy$log_monthly_income))
+varImp(lm_fit, scale = TRUE)
+```
+
+Using stepwise feature selection, the linear model chose 15 parameters. This model achieves a RMSE of 0.21 (log salary data), R squared of 0.89, and a MAE of 0.16. This model exceeds expectations and will be a useful model for predicting salary. The most important variables relate primarily to Job level and time working in the form of total working years and years at the current company. This is unsurprising given the initial analysis, and makes sense intuitively. People generally get promoted over time and are paid more with more experience. It would be interesting to see which factors are the most important when controlling for time. The next most important variables are related to specific positions, as we have seen in the initial analysis.
+
+### Checking Assumptions
+
+To check the assumptions of the linear regression model, we will visualize the residuals with plots to check for linearity and heteroscedasticity. Next, we will plot a histogram of the residuals and Normal Q-Q plot to check for normality.
+
+#### Residual Plots
+```{r}
+# Plot the residuals using base R
+lm_fit$finalModel %>%
+  plot()
+
+hist(lm_fit$finalModel$residuals, freq = FALSE, breaks = 12)
+curve(
+    dnorm(x,
+        mean = mean(lm_fit$finalModel$residuals),
+        sd = sd(lm_fit$finalModel$residuals)
+    ),
+    add = TRUE, col = "blue"
+)
+```
+
+Based on the plots, the residuals are consistent with a Normal Distribution. There is, however, some visual evidence of heteroscedasticity and non-linearity, especially toward the higher end of predicted salaries. For now, we will proceed with the model as is, but recommend caution using the model for salary predictions above ~$13,000 per month. The author recommends addressing this discrepancy at the higher end by applying other transformations to the monthly income, or using another model such as a random forest.
+
+Lastly, we will write the predictions to a csv file for submission to DDSAnalytics.
+
+```{r}
+# Make predictions on the test data using the regression model
+test <- read_csv("Test/CaseStudy2CompSet No Salary.csv")
+testCopy <- test
+
+# Transform salary to log scale
+# test <- testCopy %>%
+#     mutate(
+#         logMonthlyIncome = log(MonthlyIncome)
+#     ) %>%
+#     select(-MonthlyIncome)
+
+# Remove columns with only one unique value
+test <- test %>%
+    select(-c(Over18, StandardHours, EmployeeCount, EmployeeNumber))
+
+# Transform categorical variables to dummy variables using dummyVars
+dummy_model <- dummyVars(~ ., data = test)
+test_dummy <- as.data.frame(predict(dummy_model, newdata = test))
+test_dummy <- clean_names(test_dummy) # Might be needed to linear regression, uncomment if so
+
+# Make predictions on the test data using the knn model
+predictions <- predict(lm_fit, newdata = test_dummy)
+predictions <- as.data.frame(predictions) %>%
+    cbind(ID = test$ID) %>%
+    mutate(MonthlyIncome = exp(predictions)) %>% 
+    select(ID, MonthlyIncome)
+
+# Write predictions to csv file
+write_csv(predictions, "Predictions/Case2PredictionsSager Salary.csv")
+```
 
 ## Results and Discussion
 
-Top 3 Factors predicting attrition
+The first question DDSAnalytics set out to answer was the top predictors of Attrition. Our analyis concludes that the mose important factors are: part time status, stock option level, and years at the company. Significant factors outside of the top three include job level and salary. Additionally, we found that, given the data, the Naive Bayes model can do a reasonable job of predicting Attrition. These findings and the associated model may be useful in predicting attrition and devising measures to increase retention in the future. As noted in the analysis, the decision to leave a company probably depends on a number of internal and external factors not represented in this data. For this reason, we suspect that there may be an upper limit to the predictive power of these models. Additionally, some of the factors we predicted to be important turned out to be less so in the models. We believe this to be because of the multicollinearity between some of the variables. For example, the model may have chosen to use total working years instead of years at the company because the two variables are highly correlated. This is a limitation of the model, and the author recommends that future models be built to include the variables the researchers are most interested in.
 
-Other Tests
+Another question DDSAnalytics set out to answer was what factors influence the salary of an employee. Our analysis concludes that the most important factors are: job level, total working years, and years at the company. The specific role also plays a major role in determining salary levels. The linear regression model we developed can be used to predict salary, and may be useful in determining salary levels for new employees. The model does have some limitations, however. The model does not perform well for salaries above $13,000 per month, but with so few employees at that level, it becomes more difficult to model. The author recommends other methods be used in conjunction with the model for evaluating compensation at that level.
+
+During the course of the analysis, we also discovered many interesting trends when exploring the data. Many of thes could be use in the future to build more specific models or to develop targeted interventions to improve employee retention and satisfaction.
 
 ## Conclusion
 
-Conclusion text
-
-This analysis has answered the initial questions posed by Budweiser's request, and has perhaps raised even more. The author hopes that this analysis will be useful to Budweiser in their future product development. Any questions about this analysis or proposals for additional research can be directed to the author at:
+This analysis has answered the initial questions posed by DDSAnalytics's request, and has perhaps raised even more. The author hopes that this analysis will be useful to DDSAnalytics in their future talent management and efforts to increase retention. Any questions about this analysis or proposals for additional research can be directed to the author at:
 
 Nicholas Sager: nsager@smu.edu  
 
 ## Appendix 
+
+The follwing R code was used for this analysis:
 
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
 ```
