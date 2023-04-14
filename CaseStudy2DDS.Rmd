@@ -30,7 +30,8 @@ DDSAnalytics is an analytics company that specializes in talent management solut
 Given a dataset, we will do a data analysis to identify factors that lead to attrition.  We will identify the top three factors that contribute to turnover (backed up by evidence provided by analysis). There may or may not be a need to create derived attributes/variables/features. The business is also interested in learning about any job role specific trends that may exist in the data set (e.g., “Data Scientists have the highest job satisfaction”). We will also provide any other interesting trends and observations from our analysis. The analysis will be backed up by robust experimentation and appropriate visualization. Experiments and analysis will be conducted in R. We will also to build a model to predict attrition.  Finally, we will develop an RShiny App to visualize some of the relationships or lack thereof.
 
 For an interactive app to visualize this data, please see: [Shiny App](https://nicksager.shinyapps.io/CaseStudy2/)
-For a video presentation of this analysis, please see: [Video Presentation](https://youtu.be/1Z7Z2Z7Z2Z4)
+
+For a video presentation of this analysis, please see: [Video Presentation](https://youtu.be/s0PUkwGvoew)
 
 ## Data Description
 
@@ -80,7 +81,7 @@ The two variables we are most concerned about are Salary (MonthlyIncome) and Att
 # Salary Exploration
 df %>%
     ggplot(aes(x = MonthlyIncome)) +
-    geom_histogram(bins = 20, fill = "lightblue", color = "black") +
+    geom_histogram(bins = 20, fill = "sienna3", color = "black") +
     theme_minimal() +
     labs(
         title = "Salary Distribution",
@@ -90,7 +91,7 @@ df %>%
 
 df %>%
     ggplot(aes(x = MonthlyIncome)) +
-    geom_boxplot(fill = "lightblue") +
+    geom_boxplot(fill = "sienna3") +
     theme_minimal() +
     labs(
         title = "Salary Distribution",
@@ -108,8 +109,8 @@ Next we will explore the overall attrition rate in the data set:
 ```{r}
 # Attrition Exploration
 df %>%
-    ggplot(aes(x = Attrition)) +
-    geom_bar(fill = "lightblue") +
+    ggplot(aes(x = Attrition, fill = Attrition)) +
+    geom_bar() +
     theme_minimal() +
     labs(
         title = "Attrition Distribution",
@@ -128,7 +129,7 @@ Let's visualize whether salary and attrition are related to each other:
 # Salary vs Attrition
 df %>%
     ggplot(aes(x = Attrition, y = MonthlyIncome)) +
-    geom_boxplot(fill = "lightblue") +
+    geom_boxplot(fill = "sienna3") +
     theme_minimal() +
     labs(
         title = "Salary Distribution by Attrition",
@@ -384,7 +385,7 @@ There aren't any clear trends here. Sales Representatives apparently aren't leav
 df %>%
     group_by(Attrition) %>%
     ggplot(aes(x = Attrition, y = JobSatisfaction)) +
-    geom_boxplot(fill = "lightblue") +
+    geom_boxplot(fill = "sienna3") +
     theme_minimal() +
     labs(
         title = "Job Satisfaction by Attrition",
@@ -455,7 +456,7 @@ Another factor that could be important in predicting attrition is the performanc
 df %>%
     group_by(Attrition) %>%
     ggplot(aes(x = Attrition, y = PerformanceRating)) +
-    geom_boxplot(fill = "lightblue") +
+    geom_boxplot(fill = "sienna3") +
     theme_minimal() +
     labs(
         title = "Performance Rating by Attrition",
@@ -669,7 +670,7 @@ The KNN model performs fairly well. It's Sensitivity and Specificity are both 0.
 
 #### Naive Bayes
 
-A Naive Bayes model is a probabilistic model that is commonly used for classification tasks. It's based on Bayes' theorem, which states that the probability of a hypothesis (in this case, a classification) given some evidence (in this case, the features or variables) is proportional to the probability of the evidence given the hypothesis, multiplied by the prior probability of the hypothesis. Theorem: $$ P(A|B) = (P(B|A)P(A))/P(B) $$ The Naive Bayes model makes the assumption that the features are independent of each other, which is why it's called "Naive". This assumption is often violated in real-world data, but it's a useful model for classification tasks.
+A Naive Bayes model is a probabilistic model that is commonly used for classification tasks. It's based on Bayes' theorem, which states that the probability of a hypothesis (in this case, a classification) given some evidence (in this case, the features or variables) is proportional to the probability of the evidence given the hypothesis, multiplied by the prior probability of the hypothesis. Theorem: $$ P(A|B) = \frac{(P(B|A)P(A))}{P(B)} $$ The Naive Bayes model makes the assumption that the features are independent of each other, which is why it's called "Naive". This assumption is often violated in real-world data, but it's a useful model for classification tasks.
 
 Because Naive Bayes is a probabilistic model, the unbalanced nature of the Attrition data should be less of an issue. Like the KNN, we wil train the model using 5-fold repeated cross-validation using the caret package. We will also use the hyperparameters Laplace smoothing, bandwidth, and kernel to tune the model.
 
