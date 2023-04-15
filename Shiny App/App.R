@@ -1,14 +1,14 @@
 library(shiny)
 library(tidyverse)
 
-beers_breweries <- read.csv("beers_breweries.csv")
+df <- read.csv("CaseStudy2-data.csv")
 
 
 # Define UI for random distribution app ----
 ui <- fluidPage(
 
   # App title ----
-  titlePanel("Beers Case Study Explorer"),
+  titlePanel("Employment Case Study Explorer"),
 
   # Sidebar layout with input and output definitions ----
   sidebarLayout(
@@ -18,8 +18,8 @@ ui <- fluidPage(
 
       # Input: Select the metric of interest ----
       radioButtons("metric", "Metric of Interest:",
-                   c("Alcohol by Volume (abv)" = "ABV",
-                     "Bitterness (IBU)" = "IBU")),
+                   c("Attrition" = "Attrition",
+                     "Salary" = "MonthlyIncome")),
 
       # br() element to introduce extra vertical spacing ----
       br(),
@@ -33,15 +33,18 @@ ui <- fluidPage(
       br(),
 
       # Input: Show Linear Regression ----
-      radioButtons("lm", "Show Linear Regression:",
-                   c("Yes" = TRUE,
-                     "No" = FALSE)),
+      radioButtons("group", "Group By:",
+                   c("Job Role" = "JobRole",
+                     "Department" = "Department")),
 
       # br() element to introduce extra vertical spacing ----
       br(),
       
-      # Input: Slider for the number of observations to generate ----
-      textInput("state", label = "Filter by State (e.g., UT)"),
+      # Input: Predictor variable to compare to ----
+      selectInput("predictor", "Variable:",
+                c("Job Role" = "JobRole",
+                  "Monthly Salary" = "MonthlyIncome",
+                  "Job Satisfaction" = "JobSatisfaction")),
 
       #Input: Slider for the number of bins ----
       sliderInput(inputId = "bins",
@@ -56,7 +59,7 @@ ui <- fluidPage(
 
       # Output: Tabset w/ plot, summary, and table ----
       tabsetPanel(type = "tabs",
-                  tabPanel("Scatter Plot", plotOutput("scatter")),
+                  tabPanel("Grouped Summary", plotOutput("scatter")),
                   tabPanel("Individual Distribution", plotOutput("plot"))
       )
 
@@ -66,46 +69,49 @@ ui <- fluidPage(
 
 # Define server logic for random distribution app ----
 server <- function(input, output) {  
-  # Reactive expression to generate the requested filter ----
-  # This is called whenever the inputs change. The output functions
-  # defined below then use the value computed from this expression
-  # reactive({
-  #   if (nchar(input$state) == 0) {
-  #     beers <- beers_breweries
-  #   } else {
-  #     beers <- beers_breweries %>% filter(State == input$state)
-  #   }
-  # })
-  # NOT WORKING outside of renderPlot calls
-
   # Generate a plot of the data ----
   # Also uses the inputs to build the plot label. Note that the
   # dependencies on the inputs and the data reactive expression are
   # both tracked, and all expressions are called in the sequence
   # implied by the dependency graph.
   output$plot <- renderPlot({
-    if (nchar(input$state) == 0) {
-      beers <- beers_breweries
-    } else {
-      beers <- beers_breweries %>% filter(State == input$state)
-    }
-    print(str(beers))
+    # if (input$groupJobRole == TRUE) {
+    df2 <- df %>%
+      mutate(df, Attrition = ifelse(Attrition == "Yes", 1, 0))
+        # group_by(!!sym(input$group)) %>%
+        # summarise(
+        #   Attrition = mean(Attrition),
+        #   MonthlyIncome = mean(MonthlyIncome)
+        # )
+    # } else {
+    #   df2 <- df %>%
+    #     group_by(Department) %>%
+    #     summarise(
+    #       Attrition = mean(Attrition),
+    #       MonthlyIncome = mean(MonthlyIncome)
+    #     )
+    # }
     if(input$plot == "geom_histogram") {
-      beers %>%
-        ggplot(aes(x = !!sym(input$metric))) +
+      df2 %>%
+        ggplot(aes(x = !!sym(input$metric), fill = !!sym(input$group))) +
         geom_histogram(bins = input$bins) +
         labs(
             title = paste("Distribution of ", input$metric, sep = ""),
-            x = "ABV",
+            x = paste(input$metric, sep = ""),
             y = "Count"
         )
     } else {
-      beers %>%
-        ggplot(aes(x = !!sym(input$metric))) +
+      df2 %>%
+        # group_by(!!sym(input$group)) %>%
+        # summarise(
+        #   Attrition = mean(Attrition == "Yes"),
+        #   MonthlyIncome = mean(MonthlyIncome)
+        # ) %>%
+        ggplot(aes(x = !!sym(input$metric), fill = !!sym(input$group))) +
         geom_boxplot()+
         labs(
             title = paste("Distribution of ", input$metric, sep = ""),
-            x = "ABV",
+            x = paste(input$metric, sep = ""),
             y = "Count"
         )
     }   
@@ -113,38 +119,28 @@ server <- function(input, output) {
 
   # Generate a scatterplot of ABV vs IBU ----
   output$scatter <- renderPlot({
-    if (nchar(input$state) == 0) {
-      beers <- beers_breweries
-    } else {
-      beers <- beers_breweries %>% filter(State == input$state)
-    }
-
-    if (input$lm == TRUE) {
-      beers %>%
-        ggplot(aes(x = ABV, y = IBU, color = Ale)) +
-        geom_point() +
-        geom_smooth(method = "lm", se = FALSE, color = "black") +
-        labs(
-          x = "Alcohol Content (ABV)",
-          y = "Bitterness (IBU)",
-          title = "Alcohol Content vs. Bitterness"
-        ) +
-        scale_x_continuous(labels = scales::percent) +
-        theme_minimal()
-    } else {
-      beers %>%
-        ggplot(aes(x = ABV, y = IBU, color = Ale)) +
-        geom_point() +
-        labs(
-          x = "Alcohol Content (ABV)",
-          y = "Bitterness (IBU)",
-          title = "Alcohol Content vs. Bitterness"
-        ) +
-        scale_x_continuous(labels = scales::percent) +
-        theme_minimal()
-    }
+    df2 <- df %>%
+      group_by(!!sym(input$group)) %>%
+      summarise(
+        Attrition = mean(Attrition == "Yes"),
+        MonthlyIncome = mean(MonthlyIncome),
+        JobSatisfaction = mean(JobSatisfaction)
+      )
+    # }
+    df2 %>%
+      ggplot(aes(x = !!sym(input$predictor), y = !!sym(input$metric), color = !!sym(input$group))) +
+      geom_point() +
+      labs(
+        x = paste(input$Metric),
+        y = "Count",
+        title = paste(input$metric, input$predictor, sep = " vs. ")
+      ) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
   })
 }
 
 # Create Shiny app ----
 shinyApp(ui, server)
+
+# rsconnect::deployApp(appName = "CaseStudy2", appTitle = "MSDS 6306 Case Study 2")
